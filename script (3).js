@@ -1,0 +1,787 @@
+// === Miniapp frontend (Telegram WebApp + VK Mini Apps) ===
+
+//NOCO DB
+//const FUNCTION_URL = "https://functions.yandexcloud.net/d4e1po7m6l0nno0u1c5h";
+
+//GS DB
+const FUNCTION_URL = "https://functions.yandexcloud.net/d4eb11mpohc2c0sg6fba";
+
+/* =========================================================
+   Platform context: Telegram / VK
+========================================================= */
+const APP_CONTEXT = {
+  platform: "web",
+  tg: null,
+  vk: null,
+};
+
+// Telegram (если открыто как Telegram WebApp)
+try {
+  const tg = window.Telegram?.WebApp;
+  if (tg) {
+    APP_CONTEXT.platform = "telegram";
+    APP_CONTEXT.tg = {
+      initData: tg.initData || "",
+      initDataUnsafe: tg.initDataUnsafe || {},
+      user: tg.initDataUnsafe?.user || null,
+      start_param: tg.initDataUnsafe?.start_param || "",
+    };
+    tg.ready();
+    try { tg.expand(); } catch (_) {}
+  }
+} catch (_) {}
+
+// VK Mini Apps (если открыто внутри VK)
+async function initVK() {
+  try {
+    const vkBridge = window.vkBridge;
+    if (!vkBridge) return;
+    await vkBridge.send("VKWebAppInit");
+    APP_CONTEXT.platform = "vk";
+
+    const qs = window.location.search ? window.location.search.replace(/^\?/, "") : "";
+    APP_CONTEXT.vk = { launchParamsRaw: qs };
+
+    try {
+      const info = await vkBridge.send("VKWebAppGetUserInfo");
+      APP_CONTEXT.vk.user = info;
+    } catch (_) {}
+  } catch (_) {}
+}
+initVK();
+
+/* =========================================================
+   Persist form state (localStorage)
+========================================================= */
+const FORM_STATE_KEY = "ft-bank-reg-form-state:v1";
+
+function readState() {
+  try {
+    const raw = localStorage.getItem(FORM_STATE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeState(state) {
+  try {
+    localStorage.setItem(FORM_STATE_KEY, JSON.stringify(state));
+  } catch (_) {}
+}
+
+function clearState() {
+  try {
+    localStorage.removeItem(FORM_STATE_KEY);
+  } catch (_) {}
+}
+
+function debounce(fn, wait = 350) {
+  let t = null;
+  return (...args) => {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => fn(...args), wait);
+  };
+}
+
+function captureFormState(formEl) {
+  const state = {};
+  const els = formEl.querySelectorAll("input, select, textarea");
+  els.forEach((el) => {
+    if (!el.name) return;
+    if (el.type === "checkbox") state[el.name] = !!el.checked;
+    else if (el.type === "radio") {
+      if (el.checked) state[el.name] = el.value;
+    } else {
+      state[el.name] = el.value;
+    }
+  });
+  return state;
+}
+
+function applyFormState(formEl, state) {
+  if (!state) return;
+  const els = formEl.querySelectorAll("input, select, textarea");
+
+  els.forEach((el) => {
+    if (!el.name) return;
+    if (!(el.name in state)) return;
+
+    if (el.type === "checkbox") el.checked = !!state[el.name];
+    else if (el.type === "radio") el.checked = String(state[el.name]) === String(el.value);
+    else el.value = state[el.name];
+  });
+
+  // Trigger to restore dependent blocks
+  els.forEach((el) => {
+    if (!el.name) return;
+    if (!(el.name in state)) return;
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+/* =========================================================
+   Tracks data 
+========================================================= */
+const IT_TRACK_GROUPS = [
+  {
+    "group": "Анализ данных",
+    "items": [
+      {
+        "title": "Аналитик данных",
+        "desc": "Для тех, кто живёт в Москве, в том числе выпускников онлайн-школ\nФормат работы: очно в офисе/гибридный\n\nЧто предстоит делать\n- Решать аналитические и исследовательские задачи\n- Собирать, анализировать и обрабатывать данные\n- Оптимизировать и создавать новые дашборды (управленческая отчетность, клиентская аналитика, отчетность по продуктам и другие) \n- Создавать ценность предложений для клиентов на основе данных (выявлять точки роста, разрабатывать и улучшать модели рекомендаций)\n- Интегрировать ИИ-инструменты в ежедневную работу команды\n\nНеобходимые навыки\n- Уверенные знания Python\n- SQL на уровне написания сложных запросов (CTE, различные виды Join, индексы и пр.)\n- Хорошая база в статистике и теории вероятностей\n- Продвинутый уровень Excel\n- Опыт работы с каким-либо BI инструментом (Power BI, Tableau, Qlik, Apache Superset, Dash, Shiny и пр.) \n- Опыт использования ИИ, LLM\n- Английский язык на уровне Intermediate (B1) и выше\n\nБудет плюсом\n- Знания и опыт решения задач машинного обучения (классические модели для задач регресси и классификации, NLP)\n- Знания в области компьютерного зрения"
+      },
+      {
+        "title": "Инженер данных",
+        "desc": "Для тех, кто живёт в Москве, в том числе выпускников онлайн-школ\nФормат работы: гибридный\n\nЧто предстоит делать \n- Автоматизировать процессы сбора, хранения и анализа данных из открытых и закрытых источников (ETL)\n- Автоматизировать процессы обработки, «обогащения» и нормализации данных\n- Разрабатывать аналитические витрины вместе с продуктовым аналитиками\n- Разрабатывать и рассчитывать актуальные метрики качества данных \n- Поддерживать продукт при изменениях в интерфейсах и форматах данных поставщиков, взаимодействовать с технической поддержкой поставщиков данных\n\nНеобходимые навыки\n- Уверенное знание SQL (Join, агрегатные функции, подзапросы и оконные функции)\n- Знание основ Python (стандартные библиотеки, Pandas) и Git\n- Представление об экосистеме больших данных (Hadoop, Hive, PySpark, Airflow)\n- Представление о реляционных СУБД (PostgreSQL)\n- Знание основ ETL-процессов\n- Интерес к работе с LLM и ML"
+      }
+    ]
+  },
+  {
+    "group": "Инфраструктура",
+    "items": [
+      {
+        "title": "Инженер по сопровождению и эксплуатации",
+        "desc": "Подходит выпускникам онлайн-школ\nФормат работы: гибридный/удаленный\n\nЧто предстоит делать \n- Разбирать кейсы от бизнес-заказчиков, решать запросы от коллег из смежных подразделений\n- Разрабатывать и улучшать мониторинг и логирование\n- Проводить проверки через Python, SQL, ELK-стек\n\nНеобходимые навыки\n- Уверенное знание Python (понимание синтаксиса, базовых методов)\n- Базовые знания SQL (Select, Join, группировка и агрегатные функции)\n- Grafana (базовое понимание устройства дашбордов), ELK\n- Базовое понимание TCP/IP, HTTP(S), JSON, REST API\n\nБудет плюсом\n- Базовое понимание финансового рынка\n- Понимание работы микросервисной архитектуры в Kubernetes"
+      }
+    ]
+  },
+  {
+    "group": "Тестирование",
+    "items": [
+      {
+        "title": "QA-инженер",
+        "desc": "Подходит выпускникам онлайн-школ\nФормат работы: гибридный/удаленный\n\nЧто предстоит делать\n- Помогать с развитием end-to-end тестирования (автотесты)\n- Участвовать в развитии продукта: от планирования задач до запуска в работу\n- Изучать бизнес-процессы, выявлять недостатки и предлагать способы их устранения\n\nНеобходимые навыки\n- Представление о роли QA в процессе разработки\n- Знание одного из языков программирования (Java, Kotlin, JavaScript, С++, Kotlin и пр.)\n- Базовое понимание типов тестирования и процесса обеспечения качества\n- Умение писать тест-кейсы и чек-листы, знать про клиент-серверную архитектуру\n- Базовые знания SQL\n- Минимальный опыт тестирования (pet-проекты, стажировка, проект в онлайн-школе и т. д.)\n- Знание Chrome Devtools и техник тест-дизайна"
+      }
+    ]
+  }
+];
+const NONIT_TRACK_GROUPS = [
+  {
+    "group": "Клиентские операции и сервис",
+    "items": [
+      {
+        "title": "Обслуживание торгового финансирования",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: очно в офисе\n\nЧто предстоит делать\n- Работать в команде продаж продуктов торгового финансирования\n- Взаимодействовать с клиентами корпоративного и инвестиционного сегмента, проводить встречи и структурировать трансграничные сделки\n- Собирать и анализировать обратную связь от клиентов, готовить аналитические отчеты и выводы по продуктам банка\n- Разрабатывать новые решения по торговому финансированию и развивать продуктовую линейку\n- Цифровизировать и создавать сервисы для торгового финансирования, прорабатывать пользовательские сценарии и требования\n\nНеобходимые навыки\n- Английский язык на уровне Advanced (C1)\n- Знания в экономике (анализ финансового положения предприятий, основы макроэкономики и рыночных процессов)\n- Умение работать в Excel на продвинутом уровне (сводные таблицы, ВПР, макросы)\n- Знание принципов работы фронт-офиса\n- Коммуникативность и умение адаптироваться под бизнес-потребности клиентов\n- Проактивность, инициативность, ответственность и нацеленность на результат\n\nБудет плюсом\n- Базовые навыки SQL и Python\n- Владение BI-инструментами (например, Power BI, Tableau) на базовом уровне"
+      },
+      {
+        "title": "Депозитарное обслуживание",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: гибридный\n\nЧто предстоит делать\n- Следить за выплатами доходов по ценным бумагам\n- Отслеживать подачу инструкций в депозитарии и регистраторы, проверять их статусы \n- Отвечать на запросы клиентов о прошедших корпоративных действиях и выплатах\n- Мониторить качество данных о предстоящих корпоративных действиях в системе депозитарного учёта\n\nНеобходимые навыки\n- Английский язык на уровне Intermediate (B1)\n- Средний уровень владения Excel"
+      },
+      {
+        "title": "Развитие цифровых банковских решений",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: очно в офисе\n\nЧто предстоит делать\n- Развивать продажи транзакционных продуктов на закреплённой территории\n- Запускать совместно с продуктовыми командами новые решения, формировать спрос и развивать рынок\n- Обучать и вовлекать клиентских менеджеров, чтобы они могли уверенно предлагать продукты\n- Проводить вебинары, тренинги и презентации для донесения ценности продуктов до клиента\n- Масштабировать успешные кейсы, внедряя лучшие практики продаж по всей сети\n\nНеобходимые навыки\n- Английский язык на уровне Intermediate (B1) и выше\n- Владение Excel на среднем уровне\n- Умение работать с Power Point и Figma\n- Умение находить общий язык с разными командами и клиентами\n- Ответственность и инициативность\n\nБудет плюсом\n- Участие в хакатонах, кейс-чемпионатах, конференциях или учебных проектах\n- Интерес к развитию в управлении продуктом и проектами\n- Использование ИИ и LLM в учебных проектах"
+      },
+      {
+        "title": "Работа с корпоративными клиентами",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: очно в офисе\n\nЧто предстоит делать\n- Работать с внешними ключевыми клиентами, консультировать и заключать крупные сделки\n- Оцифровывать и работать с документами от внешних клиентов и внутренних стейкхолдеров — кредитных экспертов, торгового финансирования, финансовых институтов и других подразделений\n- Обеспечивать точность и оперативность обработки документов на всех этапах\n- Взаимодействовать с различными командами для уточнения деталей и согласования процессов\n- Строить и улучшать процессы обработки документов, делая их более эффективными и клиентоориентированными\n\nНеобходимые навыки\n- Английский язык на уровне Intermediate (B1) и выше\n- Владение Excel на среднем уровне\n- Хороший тайм-менеджмент и умение расставлять приоритеты\n- Умение работать в команде и эффективно взаимодействовать с коллегами из разных подразделений"
+      },
+      {
+        "title": "Работа с клиентами на рынках капитала",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: очно в офисе\n\nЧто предстоит делать\n- Изучать механизмы и модели ценообразования по различным финансовым инструментам (FX Derivatives, FX Spot и другие)\n- Взаимодействовать с корпоративными и институциональными клиентами, выявлять потребности и формировать на их основе продуктовые решения, выполнять базовые вопросы\n- Участвовать в сделках от этапа origination до execution\n- Участвовать в сделках и проектах крупных эмитентов по выкупу ценных бумаг: собирать заявки и вести коммуникацию\n- Готовить индикативные предложения по финансовым инструментам\n- Создавать креативные презентации про продукты, аналитику и продажи\n- Помогать команде наполнять контентом и контекстом ИИ-агентов\n\nНеобходимые навыки\n- Английский язык на уровне Advanced (C1) — чтение, письмо и устная речь\n- Продвинутый уровень владения Excel (сводные таблицы, ВПР)\n- Коммуникативность и многозадачность\n- Желание развиваться в направлении продаж и работать с клиентами\n- Базовые знания рынка капитала\n\nБудет плюсом\n- Опыт работы с Figma\n- Навык промтинга, работы с ИИ и LLM"
+      }
+    ]
+  },
+  {
+    "group": "Внутренний аудит",
+    "items": [
+      {
+        "title": "Аудит рынка капитала и ценных бумаг",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: гибридный\n\nЧто предстоит делать\n- Проводить предварительный анализ зоны аудита: изучать события операционных рисков, регуляторные и внутренние требования, участвовать в интервью и отрисовывать схемы процессов\n- Работать с данными с использованием LLM и ИИ-агентов: запрашивать и обрабатывать данные из различных источников, выполнять фильтрацию, агрегацию и расчеты\n- Анализировать материалы, полученные в ходе аудита: проверять данные, изучать первичные документы по сделкам, а также аналитические материалы, включая отчеты по соблюдению лимитных требований\n- Самостоятельно презентовать результаты проверок менеджменту банка\n- Изучать практики конкурентов, лучшие отраслевые подходы и привносить их в рамках рекомендаций командам: анализировать отчеты консалтинговых компаний, открытые документы и материалы регуляторов\n- Подготавливать итоговый отчет по результатам проведённой работы на английском языке\n\nНеобходимые навыки\n- Английский язык на уровне Upper-Intermediate (B2) и выше, умение составлять официальные запросы на нем\n- Продвинутое владение Excel\n- Базовые умения в SQL\n- Опыт работы с объёмными документами (100+ страниц)\n- Высокий уровень тайм-менеджмента\n- Умение уверенно отстаивать свою точку зрения, сохраняя конструктивный подход\n\nБудет плюсом\n- Базовые знания управления проектами"
+      }
+    ]
+  },
+  {
+    "group": "Корпоративное обучение",
+    "items": [
+      {
+        "title": "Методолог в команду корпоративного обучения",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: гибридный\n\nЧто предстоит делать\n- Проектировать и верстать лендинги для различных программ обучения\n- Участвовать в разработке ИИ-тренажёров для обучения и развития сотрудников\n- Перерабатывать и создавать обучающий контент — например, превращать материалы в one-pagers и другие удобные форматы\n- Разрабатывать тесты и опросы для оценки эффективности обучающих материалов\n- Взаимодействовать с внешними провайдерами — поиск, сбор и анализ предложений\n- Проводить исследования для выявления потребностей и эффективности обучающих продуктов\n\nНеобходимые навыки\n- Английский язык на уровне Intermediate (B1) и выше\n- Умение работать в иллюстраторах, Figma и других\n- Грамотная устная и письменная речь\n- Умение искать и анализировать информацию из различных источников\n- Умение работать с искусственным интеллектом и понимание алгоритма работы с ним (написание промптов, использование ИИ-инструментов для обработки и анализа информации)\n\nБудет плюсом\n- Excel на начальном уровне"
+      }
+    ]
+  },
+  {
+    "group": "Продуктовый менеджмент",
+    "items": [
+      {
+        "title": "Продуктовый менеджер в команду инвестиций для физических лиц",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: гибридный\n\nЧто предстоит делать\n- Анализировать обратную связь клиентов по инвестиционным продуктам из call-центра, опросов и других источников, выделять основные боли и точки роста\n- Участвовать в клиентских исследованиях — готовить опросы, проводить интервью, собирать и структурировать данные\n- Анализировать предложения конкурентов и отслеживать тренды на рынке инвестиционных продуктов\n- Изучать клиентский путь в инвестиционных продуктах, выявлять слабые места и точки улучшения\n- Генерировать гипотезы и готовить предложения по улучшению клиентского опыта на основе аналитики и исследований\n\nНеобходимые навыки\n- Английский язык на уровне Intermediate (B1) и выше\n- Владение Excel на среднем уровне\n- Владение PowerPoint на продвинутом уровне\n- Умение структурно мыслить\n- Проактивность и умение уверенно отстаивать свою точку зрения, сохраняя конструктивный подход\n\nБудет плюсом\n- Понимание фондового рынка\n- Опыт работы в продуктовой команде\n- Участие в кейс чемпионатах, хакатонах или других проектах"
+      },
+      {
+        "title": "Продуктовый менеджер в торговом финансировании",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: очно в офисе\n\nЧто предстоит делать\n- Изучать клиентский опыт — проводить аналитику рынка, собирать обратную связь, формулировать и проверять гипотезы\n- Строить CJM, описывать профиль клиента и проводить CustDev-интервью\n- Совместно с командой формировать пользовательские истории и готовить аналитические репорты\n- Принимать участие в проектов по продвижению продуктов на рынке\n\nНеобходимые навыки\n- Знание Excel на продвинутом уровне (сводные таблицы, ВПР, макросы)\n- Умение структурно рассказать о своей идее в нескольких слайдах в PowerPoint или Figma\n- Английский язык на уровне Upper-Intermediate (B2)\n- Развитое системное мышление, аналитический склад ума и сильные коммуникативные навыки\n- Готовность к изучению аналитических инструментов (SQL и BI)\n- Интерес к тематике ИИ и машинного обучения, знание существующих на рынке инструментов"
+      },
+      {
+        "title": "Продуктовый менеджер в команду инвестиций для юридических лиц",
+        "desc": "Подходит выпускникам онлайн-школ\nФормат работы: гибридный/удаленный\n\nЧто предстоит делать\n- Ставить и декомпозировать задачи для команды разработки, сопровождать их реализацию\n- Управлять бэклогом и приоритизацией задач\n- Координировать работу со смежными командами, контролировать сроки и эскалировать риски\n- Участвовать в формировании продуктовых решений на этапе дизайна\n- Моделировать и описывать бизнес-процессы\n- Проводить продуктовые демо, собирать и обрабатывать обратную связь от бизнеса\n- Анализировать проблемные зоны продукта и инициировать улучшения\n- Взаимодействовать с бизнес-заказчиками на всех этапах жизненного цикла задач\n\nНеобходимые навыки\n- Знание Excel\n- Продвинутый пользователь PowerPoint и Figma\n- Понимание фондового рынка (инвестиции)\n- Наличие базовых знаний по продуктовому менеджменту\n- Коммуникабельность, нацеленность на результат, проактивность\n\nБудет плюсом\n- Интерес к работе с ИИ и машинному обучению, знание существующих на рынке инструментов"
+      }
+    ]
+  },
+  {
+    "group": "Риск-аналитика",
+    "items": [
+      {
+        "title": "Портфельная риск-аналитика",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: гибридный\n\nЧто предстоит делать\n- Анализировать розничный кредитный портфель и тенденции его развития: работать с ежемесячными отчетами, мониторить ключевые показатели\n- Определять риски розничного кредитования: вырабатывать предложения по оптимизации условий и процессов кредитования физических лиц, контролировать их реализацию\n- Готовить ежемесячные, ежеквартальные и ежегодные аналитические обзоры и презентации для руководства банка\n- Участвовать в согласовании предложений по развитию розничных кредитных продуктов и изменению процессов кредитования, подготавливать аналитические заключения для кредитного комитета банка\n\nНеобходимые навыки\n- Английский язык на уровне Upper-Intermediate (B2) и выше\n- Умение работать в Excel на продвинутом уровне (сводные таблицы, ВПР, макросы)\n- Базовые знания Power BI\n\nБудет плюсом\n- Навык программирования на Python (уровень аналитика)\n- Знание основ Data Science (математическая статистика, моделирование и пр.)"
+      }
+    ]
+  },
+  {
+    "group": "Комплаенс",
+    "items": [
+      {
+        "title": "Комплаенс-контроль на финансовых рынках",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: очно в офисе\n\nЧто предстоит делать\n- Оценивать соответствие деятельности дочерной компании требованиям законодательства, корпоративным и международным стандартам\n- Выявлять и анализировать комплаенс-риски для предотвращения нарушений и санкций\n- Готовить и обновлять внутреннюю базу документов\n- Проводить анализ бизнес-процессов и сделок на предмет комплаенс-рисков\n- Работать с обращениями клиентов и участвовать в расследованиях потенциальных нарушений\n- Консультировать сотрудников по вопросам применения правовых и этических норм\n\nНеобходимые навыки\n- Английский язык на уровне Upper-Intermediate (B2) и выше\n- Владение Excel на продвинутом уровне (сводные таблицы, ВПР, макросы)\n- Умение правильно интерпретировать законодательные акты и составлять документы\n- Нацеленность на результат, умение анализировать большие объёмы данных и погружаться в сложные процессы\n\nБудет плюсом\n- Знание SQL и Python на базовом уровне"
+      },
+      {
+        "title": "Антикорупционный комплаенс",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: очно в офисе\n\nЧто предстоит делать\n- Участвовать в оценке конфликтов интересов и разработке мер по их минимизации\n- Вести и актуализировать профили сотрудников, контролировать исполнение их антикоррупционных обязательств\n- Согласовывать договоры с учетом антикоррупционных требований\n- Принимать участие в рассмотрении мероприятий, подарков и приглашений в рамках соблюдения политики компании\n\nНеобходимые навыки\n- Понимание, что такое комплаенс, и зачем он нужен в коммерческой организации\n- Умение работать в Excel и PowerPoint на продвинутом уровне\n- Английский язык на уровне Intermediate (B1) и выше\n- Аналитическое мышление, способность быстро обучаться и погружаться в детали\n- Умение структурировать большое количество информации\n- Нацеленность на результат и развитие в сфере комплаенс\n\nБудет плюсом\n- Понимание работы алгоритмов и их отличие от LLM\n- Опыт подготовки технических заданий для автоматизаций"
+      }
+    ]
+  },
+  {
+    "group": "Финансовая аналитика",
+    "items": [
+      {
+        "title": "Финансовый анализ и планирование",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: гибридный\n\nЧто предстоит делать\n- Изучать текущие финансовые модели розничных продуктов банка\n- Участвовать в процессе бюджетирования и планирования показателей розничных продуктов\n- Строить статистические модели продуктов и профили поведения клиентов\n- Работать с базами данных и совместно с продуктовыми командами анализировать доходность розничных продуктов банка\n- Поддерживать существующие отчеты и участвовать в разработке новых аналитических отчетов\n\nНеобходимые навыки\n- Английский язык на уровне Intermediate (B1) и выше\n- Владение Excel на продвинутом уровне (Power Query и макросы)\n- Базовые знания SQL (Select, Joins)\n- Развитое системное мышление и аналитический склад ума\n\nБудет плюсом\n- Владение языком программирования Python"
+      },
+      {
+        "title": "Автоматизация управленческой отчетности",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: гибридный\n\nЧто предстоит делать\n- Участвовать в ежемесячном закрытии: обновлять финансовые модели и помогать в подготовке управленческой отчетности\n- Работать с данными: заниматься их загрузкой, проверкой, анализом и обработкой\n- Участвовать в проектах по оптимизации и автоматизации процессов в том числе через использование LLM\n- Взаимодействовать с командой разработки при формировании технических заданий для автоматизации и улучшения процессов\n\nНеобходимые навыки\n- Английский язык на уровне Intermediate (B1) и выше\n- Владение Excel на продвинутом уровне (сводные таблицы, ВПР, Power Query)\n- Владение SQL на базовом уровне\n- Знание промптинга для работы с LLM\n- Аналитический склад ума и проактивность\n\nБудет плюсом\n- Владение языком программирования Python"
+      },
+      {
+        "title": "Стратегия и развитие банковских продуктов",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: гибридный\n\nЧто предстоит делать\n- Собирать и анализировать данные по рынку, продуктам и клиентам, используя открытые источники и внутренние данные банка\n- Выявлять точки роста и повышения эффективности работы команд\n- Участвовать в целеполагании для продуктовых команд\n- Участвовать в рабочих встречах, брейнштормах и презентациях результатов работы\n\nНеобходимые навыки\n- Английский язык на уровне Intermediate (B1) и выше\n- Владение Excel, SQL и Python на среднем уровне\n- Аналитическое мышление и стремление к обучению\n- Участие в кейс чемпионатах либо релевантный опыт работы или практики"
+      },
+      {
+        "title": "Подготовка и аналитика управленческой отчетности",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: гибридный\n\nЧто предстоит делать\n- Участвовать в подготовке ежедневной и ежемесячной управленческой отчетности по результатам сегментов корпоративного бизнеса, финансовых институтов, а также операций на рынках капитала\n- Отвечать на запросы бизнеса по предоставляемым данным и отчетам (анализировать и объяснять динамику результата по сегменту, продукту, клиенту)\n- Принимать участие в запуске изменений в продуктовой линейке сегмента корпоративного бизнеса — предлагать изменения в отчеты, создавать новые, фокусируясь на основных задачах блока\n\nНеобходимые навыки\n- Английский язык на уровне Intermediate (B1) и выше\n- Владение Excel на среднем уровне (сводные таблицы, ВПР, макросы)\n- Обладание базовыми знаниями SQL (Select, Joins)\n- Владение высоким уровнем коммуникаций и проактивностью в решении задач\n\nБудет плюсом\n- Владение инструментами визуализации аналитики (BI)"
+      }
+    ]
+  },
+  {
+    "group": "Юридическое сопровождение",
+    "items": [
+      {
+        "title": "Юрист",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: гибридный\n\nЧто предстоит делать\n- Юридически сопровождать подразделения по вопросам деятельности на рынке ценных бумаг, инвестиционно-банковских операций и депозитарного обслуживания\n- Разрабатывать и согласовывать договоры по доверительному управлению, брокерскому обслуживанию, купле-продаже инструментов, а также документации по ПИФам и внутренних нормативных актов\n- Консультировать по сложным правовым вопросам, включая пересечение отраслей права, иностранные юрисдикции и участие нескольких сторон\n- Подготавливать правовые заключения по кредитованию с анализом рисков и предложениями по их минимизации\n- Проверять документы юридических лиц, включая правоспособность и полномочия подписантов\n- Подготавливать запросы в государственные органы, письма и уведомления\n- Мониторить изменения в законодательстве, анализировать судебную практика и подготавливать правовые обзоры\n\nНеобходимые навыки\n- Оконченное высшее образование (бакалавриат/специалитет) по специальности юриспруденция \n- Английский язык на уровне Upper-Intermediate (B2) и выше\n- Опыт работы с Консультант+"
+      }
+    ]
+  },
+  {
+    "group": "UX/UI Дизайн",
+    "items": [
+      {
+        "title": "UX/UI Дизайнер",
+        "desc": "Для тех, кто живёт в Москве\nФормат работы: гибридный\n\nЧто предстоит делать\n- Создавать интерфейсы и их концепты для iOS и Android в продуктовой команде\n- Проводить исследования клиентского опыта в рамках стратегии self-driven bank\n- Участвовать в развитии дизайн-системы\n- Готовить макеты и документацию для команд разработки мобильных продуктов\n- Работать в связке с дизайнерами, менеджерами продуктов, редакторами, исследователями, аналитиками\n\nНеобходимые навыки\n- Умение работать в Figma на продвинутом уровне\n- Наличие опыта работы или учебных проектов в сфере дизайна мобильных приложений\n\nБудет плюсом\n- Навык работы с 3D-иллюстрациями\n- Портфолио дизайн-макетов мобильных приложений"
+      }
+    ]
+  }, 
+];
+/* =========================================================
+   Helpers
+========================================================= */
+function setBlockVisible(el, isVisible) {
+  if (!el) return;
+  el.style.display = isVisible ? "block" : "none";
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim());
+}
+
+function normalizePhone(p) {
+  return String(p || "").trim().replace(/[^\d+]/g, "");
+}
+
+// Phone validation: RU by default, allow any format if user checked "Номер не РФ"
+function normalizeRuPhoneToE164(raw) {
+  // Приводим к +7XXXXXXXXXX
+  const s = String(raw || "").trim().replace(/[^\d+]/g, "");
+  const digits = s.replace(/[^\d]/g, "");
+
+  // +7XXXXXXXXXX / 7XXXXXXXXXX
+  if (digits.length === 11 && digits[0] === "7") return "+7" + digits.slice(1);
+  // 8XXXXXXXXXX
+  if (digits.length === 11 && digits[0] === "8") return "+7" + digits.slice(1);
+  // 10 digits without country code
+  if (digits.length === 10) return "+7" + digits;
+
+  return "";
+}
+
+function validatePhone(raw, isNonRu) {
+  const v = String(raw || "").trim();
+  if (!v) {
+    return { ok: false, value: "", error: "Пожалуйста, укажите номер телефона." };
+  }
+
+  if (isNonRu) {
+    // Any format (minimal sanity check)
+    if (v.length < 5) {
+      return { ok: false, value: "", error: "Пожалуйста, укажите корректный номер телефона." };
+    }
+    return { ok: true, value: v, error: "" };
+  }
+
+  const norm = normalizeRuPhoneToE164(v);
+  if (!norm) {
+    return {
+      ok: false,
+      value: "",
+      error: "Введите номер РФ в формате +7XXXXXXXXXX или 8XXXXXXXXXX.",
+    };
+  }
+
+  return { ok: true, value: norm, error: "" };
+}
+
+function resetSelect(select, placeholder = "— Выберите —") {
+  if (!select) return;
+  select.innerHTML = "";
+  const opt = document.createElement("option");
+  opt.value = "";
+  opt.textContent = placeholder;
+  select.appendChild(opt);
+}
+
+function fillSelectWithGroups(select, groups) {
+  resetSelect(select, "— Выберите —");
+  groups.forEach((g) => {
+    const og = document.createElement("optgroup");
+    og.label = g.group;
+
+    g.items.forEach((it) => {
+      const opt = document.createElement("option");
+      opt.value = it.title;
+      opt.textContent = it.title;
+      opt.dataset.desc = it.desc || "";
+      og.appendChild(opt);
+    });
+
+    select.appendChild(og);
+  });
+}
+
+function showSelectedDescription(select, descEl) {
+  if (!select || !descEl) return;
+  const opt = select.selectedOptions?.[0];
+  const desc = opt?.dataset?.desc || "";
+  if (desc && desc.trim()) {
+    descEl.textContent = desc.trim();
+    setBlockVisible(descEl, true);
+  } else {
+    descEl.textContent = "";
+    setBlockVisible(descEl, false);
+  }
+}
+
+/* =========================================================
+   Pretty date picker (day/month/year -> hidden YYYY-MM-DD)
+========================================================= */
+function initBirthDatePicker() {
+  const day = document.getElementById("birth_day");
+  const month = document.getElementById("birth_month");
+  const year = document.getElementById("birth_year");
+  const hidden = document.getElementById("birth_date");
+
+  if (!day || !month || !year || !hidden) return;
+
+  // Fill day 1..31
+  if (day.options.length <= 1) {
+    for (let d = 1; d <= 31; d++) {
+      const opt = document.createElement("option");
+      opt.value = String(d).padStart(2, "0");
+      opt.textContent = String(d);
+      day.appendChild(opt);
+    }
+  }
+
+  // Fill months
+  const months = [
+    ["01","Январь"],["02","Февраль"],["03","Март"],["04","Апрель"],
+    ["05","Май"],["06","Июнь"],["07","Июль"],["08","Август"],
+    ["09","Сентябрь"],["10","Октябрь"],["11","Ноябрь"],["12","Декабрь"],
+  ];
+  if (month.options.length <= 1) {
+    months.forEach(([v,t]) => {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = t;
+      month.appendChild(opt);
+    });
+  }
+
+  // Fill years
+  if (year.options.length <= 1) {
+    const nowY = new Date().getFullYear();
+    const maxY = nowY - 14;
+    const minY = nowY - 80;
+    for (let y = maxY; y >= minY; y--) {
+      const opt = document.createElement("option");
+      opt.value = String(y);
+      opt.textContent = String(y);
+      year.appendChild(opt);
+    }
+  }
+
+  function daysInMonth(yyyy, mm) {
+    return new Date(Number(yyyy), Number(mm), 0).getDate();
+  }
+
+  function clampDays() {
+    if (!year.value || !month.value) return;
+    const maxD = daysInMonth(year.value, month.value);
+    const cur = Number(day.value || "0");
+    for (let i = 1; i < day.options.length; i++) {
+      const d = Number(day.options[i].value);
+      day.options[i].disabled = d > maxD;
+    }
+    if (cur > maxD) day.value = String(maxD).padStart(2, "0");
+  }
+
+  function syncHidden() {
+    if (!year.value || !month.value || !day.value) {
+      hidden.value = "";
+      return;
+    }
+    hidden.value = `${year.value}-${month.value}-${day.value}`;
+  }
+
+  year.addEventListener("change", () => { clampDays(); syncHidden(); });
+  month.addEventListener("change", () => { clampDays(); syncHidden(); });
+  day.addEventListener("change", () => { syncHidden(); });
+
+  // if hidden already has value (restored)
+  if (hidden.value && /^\d{4}-\d{2}-\d{2}$/.test(hidden.value)) {
+    const [yy, mm, dd] = hidden.value.split("-");
+    year.value = yy;
+    month.value = mm;
+    clampDays();
+    day.value = dd;
+    syncHidden();
+  }
+}
+
+/* =========================================================
+   Main
+========================================================= */
+document.addEventListener("DOMContentLoaded", () => {
+  const form = document.getElementById("reg-form");
+  const resultEl = document.getElementById("result");
+  const errorEl = document.getElementById("error");
+  const emailErrorEl = document.getElementById("email-error");
+
+  const phoneEl = document.getElementById("phone");
+  const phoneNonRuEl = document.getElementById("phone-nonru");
+
+  const city = document.getElementById("city");
+  const cityOtherBlock = document.getElementById("city_other_block");
+  const cityOther = document.getElementById("city_other");
+  const tzBlock = document.getElementById("timezone_diff_block");
+  const tz = document.getElementById("timezone_diff");
+
+  const degree = document.getElementById("education_degree");
+  const gradYearBlock = document.getElementById("grad_year_block");
+  const gradYear = document.getElementById("graduation_year");
+
+  const specialty = document.getElementById("specialty");
+
+  const direction = document.getElementById("internship_direction");
+
+  const onlineCoursesBlock = document.getElementById("online_courses_block");
+  const onlineCourses = document.getElementById("online_courses");
+  const onlineCourseYearBlock = document.getElementById("online_course_year_block");
+  const onlineCourseYear = document.getElementById("online_course_year");
+  const onlineCourseYearOtherBlock = document.getElementById("online_course_year_other_block");
+  const onlineCourseYearOther = document.getElementById("online_course_year_other");
+
+  const prioritiesBlock = document.getElementById("priorities_block");
+  const priority1 = document.getElementById("priority1");
+  const priority2 = document.getElementById("priority2");
+  const p1Desc = document.getElementById("priority1_description");
+  const p2Desc = document.getElementById("priority2_description");
+
+  const policyLink = document.getElementById("policy-link");
+  const policyText = document.getElementById("policy-text");
+
+  if (!form) return;
+
+  function clearMessages() {
+    if (resultEl) resultEl.textContent = "";
+    if (errorEl) errorEl.textContent = "";
+    if (emailErrorEl) {
+      emailErrorEl.style.display = "none";
+      emailErrorEl.textContent = "";
+    }
+  }
+
+  // Init date picker
+  initBirthDatePicker();
+
+  // Restore persisted state
+  applyFormState(form, readState());
+  const persist = debounce(() => writeState(captureFormState(form)), 350);
+  form.addEventListener("input", persist);
+  form.addEventListener("change", persist);
+
+  // Policy toggle
+  if (policyLink && policyText) {
+    policyLink.addEventListener("click", () => {
+      const isOpen = policyText.style.display === "block";
+      policyText.style.display = isOpen ? "none" : "block";
+    });
+  }
+
+  // City logic
+  function updateCityBlocks() {
+    const v = city?.value || "";
+    const isOther = v === "Другой";
+    setBlockVisible(cityOtherBlock, isOther);
+    setBlockVisible(tzBlock, isOther);
+
+    if (!isOther) {
+      if (cityOther) cityOther.value = "";
+      if (tz) tz.value = "";
+    }
+  }
+  if (city) {
+    city.addEventListener("change", updateCityBlocks);
+    updateCityBlocks();
+  }
+
+  // Degree logic
+  function updateDegreeBlocks() {
+    const noHigher = (degree?.value || "") === "Нет высшего образования";
+    setBlockVisible(gradYearBlock, !noHigher);
+    if (noHigher && gradYear) gradYear.value = "";
+  }
+  if (degree) {
+    degree.addEventListener("change", updateDegreeBlocks);
+    updateDegreeBlocks();
+  }
+
+  // Online courses logic
+  function updateOnlineCourseYear() {
+    const provider = onlineCourses?.value || "";
+    const showYear = provider && provider !== "Не проходил(а)";
+    setBlockVisible(onlineCourseYearBlock, showYear);
+
+    if (!showYear) {
+      if (onlineCourseYear) onlineCourseYear.value = "";
+      if (onlineCourseYearOther) onlineCourseYearOther.value = "";
+      setBlockVisible(onlineCourseYearOtherBlock, false);
+      return;
+    }
+
+    const isOtherYear = (onlineCourseYear?.value || "") === "Другой";
+    setBlockVisible(onlineCourseYearOtherBlock, isOtherYear);
+    if (!isOtherYear && onlineCourseYearOther) onlineCourseYearOther.value = "";
+  }
+
+  if (onlineCourses) onlineCourses.addEventListener("change", updateOnlineCourseYear);
+  if (onlineCourseYear) onlineCourseYear.addEventListener("change", updateOnlineCourseYear);
+
+  // Priorities fill
+  function fillPriorities(kind) {
+    const groups = kind === "IT" ? IT_TRACK_GROUPS : NONIT_TRACK_GROUPS;
+    fillSelectWithGroups(priority1, groups);
+    fillSelectWithGroups(priority2, groups);
+    setBlockVisible(p1Desc, false);
+    setBlockVisible(p2Desc, false);
+  }
+
+  if (priority1) priority1.addEventListener("change", () => showSelectedDescription(priority1, p1Desc));
+  if (priority2) priority2.addEventListener("change", () => showSelectedDescription(priority2, p2Desc));
+
+  // Direction change
+  function updateDirectionBlocks() {
+    const v = direction?.value || "";
+    const isIT = v === "IT" || v === "ИТ";
+    const isNonIT = v === "Бизнес" || v === "Non-IT" || v === "не IT";
+
+    setBlockVisible(onlineCoursesBlock, isIT);
+    if (!isIT) {
+      if (onlineCourses) onlineCourses.value = "";
+      if (onlineCourseYear) onlineCourseYear.value = "";
+      if (onlineCourseYearOther) onlineCourseYearOther.value = "";
+      setBlockVisible(onlineCourseYearBlock, false);
+      setBlockVisible(onlineCourseYearOtherBlock, false);
+    }
+
+    const showPriorities = isIT || isNonIT;
+    setBlockVisible(prioritiesBlock, showPriorities);
+
+    if (showPriorities) {
+      fillPriorities(isIT ? "IT" : "Non-IT");
+    } else {
+      resetSelect(priority1);
+      resetSelect(priority2);
+      setBlockVisible(p1Desc, false);
+      setBlockVisible(p2Desc, false);
+    }
+  }
+
+  if (direction) {
+    direction.addEventListener("change", updateDirectionBlocks);
+    updateDirectionBlocks();
+  }
+
+  // Submit
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    clearMessages();
+
+    const data = {};
+    const fd = new FormData(form);
+    for (const [k, v] of fd.entries()) {
+      data[k] = String(v || "").trim();
+    }
+
+    // city normalization
+    if (data.city !== "Другой") {
+      data.city_other = "";
+      data.timezone_diff = "";
+    }
+
+    // education
+    if (data.education_degree === "Нет высшего образования") {
+      data.graduation_year = "";
+    }
+
+    // specialty
+    if (data.specialty !== "Другое") {
+      data.specialty_other = "";
+    }
+
+    // direction normalization for backend: IT / Non-IT
+    if (data.internship_direction === "ИТ") data.internship_direction = "ИТ";
+    if (data.internship_direction === "Бизнес") data.internship_direction = "Бизнес";
+
+    // online courses
+    if (data.internship_direction !== "IT") {
+      data.online_courses = "";
+      data.online_course_year = "";
+      data.online_course_year_other = "";
+    } else {
+      if (!data.online_courses || data.online_courses === "Не проходил(а)") {
+        data.online_course_year = "";
+        data.online_course_year_other = "";
+      } else {
+        if (data.online_course_year !== "Другой") {
+          data.online_course_year_other = "";
+        }
+      }
+    }
+
+    // validate
+    if (!data.last_name || !data.first_name) {
+      errorEl.textContent = "Пожалуйста, заполните имя и фамилию.";
+      return;
+    }
+    if (!data.email || !isValidEmail(data.email)) {
+      emailErrorEl.style.display = "block";
+      emailErrorEl.textContent = "Пожалуйста, укажите корректный e-mail.";
+      return;
+    }
+    {
+      const isNonRuPhone = !!phoneNonRuEl?.checked;
+      const phoneCheck = validatePhone(data.phone, isNonRuPhone);
+      if (!phoneCheck.ok) {
+        errorEl.textContent = phoneCheck.error;
+        return;
+      }
+      data.phone = phoneCheck.value;
+    }
+    if (!data.birth_date) {
+      errorEl.textContent = "Пожалуйста, выберите дату рождения.";
+      return;
+    }
+    if (!data.city) {
+      errorEl.textContent = "Пожалуйста, выберите город проживания.";
+      return;
+    }
+    if (data.city === "Другой" && !data.timezone_diff) {
+      errorEl.textContent = "Пожалуйста, выберите разницу во времени относительно Мск.";
+      return;
+    }
+    if (!data.education_degree) {
+      errorEl.textContent = "Пожалуйста, выберите степень образования.";
+      return;
+    }
+    if (data.education_degree !== "Нет высшего образования" && !data.graduation_year) {
+      errorEl.textContent = "Пожалуйста, выберите год выпуска.";
+      return;
+    }
+    if (!data.specialty) {
+      errorEl.textContent = "Пожалуйста, выберите специальность.";
+      return;
+    }
+    if (!data.internship_direction) {
+      errorEl.textContent = "Пожалуйста, выберите направление стажировки.";
+      return;
+    }
+    if (!data.priority1 || !data.priority2) {
+      errorEl.textContent = "Пожалуйста, выберите два приоритета.";
+      return;
+    }
+    if (!data.hours_per_week) {
+      errorEl.textContent = "Пожалуйста, выберите количество часов.";
+      return;
+    }
+    if (!data.ready_6_months) {
+      errorEl.textContent = "Пожалуйста, выберите готовность на 6 месяцев.";
+      return;
+    }
+
+    // platform meta
+   data.platform = APP_CONTEXT.platform;
+
+   if (APP_CONTEXT.platform === "telegram" && APP_CONTEXT.tg) {
+     data.tg_init_data = APP_CONTEXT.tg.initData || "";
+   }
+
+   // VK: пробрасываем "tg-id" как "<vkUserId>_VK"
+   if (APP_CONTEXT.platform === "vk") {
+     data.vk_launch_params = APP_CONTEXT.vk?.launchParamsRaw || "";
+
+     const vkId = APP_CONTEXT.vk?.user?.id ? String(APP_CONTEXT.vk.user.id) : "";
+     if (vkId) {
+    // На всякий случай кладём в оба варианта ключа:
+    // 1) tg-id (как у тебя в Noco, судя по названию столбца)
+       data["tg-id"] = `${vkId}_VK`;
+    // 2) tg_id (если бэк ожидает snake_case)
+       data.tg_id = `${vkId}_VK`;
+   }
+}
+
+
+    try {
+      const res = await fetch(FUNCTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+
+      const js = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        errorEl.textContent = js?.error || `Ошибка отправки (HTTP ${res.status})`;
+        return;
+      }
+
+      if (js && js.duplicate) {
+        resultEl.textContent = js.message || "Мы уже нашли вашу заявку ✅";
+        clearState();
+        return;
+      }
+
+      resultEl.textContent = "Данные отправлены ✅";
+      clearState();
+    } catch (err) {
+      errorEl.textContent = "Ошибка отправки: " + (err?.message || String(err));
+    }
+  });
+});
