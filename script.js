@@ -475,7 +475,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const emailErrorEl = document.getElementById("email-error");
 
   const phoneEl = document.getElementById("phone");
-  const phoneNonRuEl = document\.getElementById\("phone-nonru"\);
+  const phoneNonRuEl = document.getElementById("phone-nonru");
   const citizenship = document.getElementById("citizenship");
 
 
