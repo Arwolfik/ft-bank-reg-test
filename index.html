@@ -133,6 +133,18 @@
       <input id="birth_date" name="birth_date" type="hidden" required />
     </div>
 
+    <!-- NEW: Citizenship -->
+    <label for="citizenship">Гражданство</label>
+    <select id="citizenship" name="citizenship" required>
+      <option value="">— Выберите —</option>
+      <option>Россия</option>
+      <option>Беларусь</option>
+      <option>Казахстан</option>
+      <option>Кыргызстан</option>
+      <option>Армения</option>
+      <option>Другое</option>
+    </select>
+
     <label for="city">Город проживания</label>
     <select id="city" name="city" required>
       <option value="">— Выберите —</option>
@@ -263,7 +275,7 @@
       Заполняя форму и нажимая кнопку "Отправить", я даю согласие на <a href="https://fut.ru/personal_data_agreement" target="_blank" rel="noopener noreferrer">обработку</a> и <a href="https://fut.ru/personal_data_transfer_agreement" target="_blank" rel="noopener noreferrer">передачу</a> моих персональных данных в соответствии с условиями <a href="https://fut.ru/personal-data" target="_blank" rel="noopener noreferrer">Политики</a> обработки персональных данных
     </div>
 
-    <button type="submit">Отправить</button>    
+    <button type="submit">Отправить</button>
 
     <p id="result"></p>
     <p id="error" class="error"></p>
