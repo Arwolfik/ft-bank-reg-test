@@ -485,10 +485,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const policyLink = document.getElementById("policy-link");
   const policyText = document.getElementById("policy-text");
-  const resumeInput = document.getElementById("resume");
-  const resumeFile = resumeInput.files?.[0];
-  const MAX_FILE_SIZE = 15 * 1024 * 1024;
-  console.log(resumeFile)
 
   
 
@@ -628,16 +624,6 @@ if (!showYear) {
     updateDirectionBlocks();
   }
 
-  resumeInput?.addEventListener("change", () => {
-    const file = resumeInput.files?.[0];
-    if (!file) return;
-
-    if (file.size > MAX_FILE_SIZE) {
-      errorEl.textContent = "Слишком большой файл. Максимум 15 МБ.";
-      resumeInput.value = "";
-    }
-  });
-
   // Submit
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -648,16 +634,6 @@ form.addEventListener("submit", async (e) => {
   for (const [k, v] of fd.entries()) {
     if (v instanceof File) continue;
     data[k] = String(v || "").trim();
-  }
-
-  const resumeFile = resumeInput?.files?.[0];
-  if (!resumeFile) {
-    errorEl.textContent = "Пожалуйста, прикрепите файл с резюме.";
-    return;
-  }
-  if (resumeFile.size > MAX_FILE_SIZE) {
-    errorEl.textContent = "Слишком большой файл. Максимум 15 МБ.";
-    return;
   }
 
   if (data.city !== "Другой") {
